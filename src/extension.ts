@@ -794,6 +794,11 @@ function vsCommandAddSubfolderToWorkspace(): Disposable {
 					name: folder.name
 				}));
 
+			// Close the current webview before changing workspace folder 0.
+			// Disposing it while the workspace is still stable avoids leaving
+			// a stale webview behind when VS Code restarts the extension host.
+			VueWebviewPanel.currentPanel?.dispose();
+
 			const success = workspace.updateWorkspaceFolders(
 				0,
 				currentFolders.length,
