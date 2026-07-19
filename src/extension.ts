@@ -42,6 +42,30 @@ export let compileOutputProvider: Disposable;
 
 let debounceTimeout: NodeJS.Timeout | undefined; // To debounce changes to settings
 
+function getWebviewTabSnapshot() {
+	return window.tabGroups.all.flatMap((group, groupIndex) =>
+		group.tabs
+			.filter((tab) => tab.input && tab.input.constructor.name === "TabInputWebview")
+			.map((tab, tabIndex) => ({
+				groupIndex,
+				tabIndex,
+				label: tab.label,
+				viewType: "viewType" in tab.input ? String(tab.input.viewType) : undefined,
+				isActive: tab.isActive,
+				isDirty: tab.isDirty,
+				isPreview: tab.isPreview
+			}))
+	);
+}
+
+function logWebviewLifecycleSnapshot(event: string): void {
+	debugLog(event, {
+		hasCurrentPanel: VueWebviewPanel.currentPanel !== undefined,
+		webviewTabs: getWebviewTabSnapshot(),
+		workspaceFolders: workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? []
+	});
+}
+
 async function ensureSerialMonitorAvailable(): Promise<void> {
 	const arch = os.arch?.() || "";
 	if (arch === "arm64" || arch === "aarch64") {
@@ -102,6 +126,8 @@ export async function activate(context: ExtensionContext) {
 	const debugLogPath = initializeDebugLog(context);
 	arduinoExtensionChannel.appendLine(`Persistent debug log: ${debugLogPath}`);
 	debugLog("activate: begin");
+	logWebviewLifecycleSnapshot("activate: initial lifecycle snapshot");
+	setTimeout(() => logWebviewLifecycleSnapshot("activate: delayed lifecycle snapshot (250ms)"), 250);
 
 	context.subscriptions.push(vsCommandAddSubfolderToWorkspace());
 
@@ -787,7 +813,18 @@ function vsCommandAddSubfolderToWorkspace(): Disposable {
 	);
 }
 
-export function deactivate() {
+export async function deactivate(): Promise<void> {
 	debugLog("=== EXTENSION DEACTIVATE ===");
+	logWebviewLifecycleSnapshot("deactivate: before panel disposal");
+
+	const panel = VueWebviewPanel.currentPanel;
+	if (!panel) {
+		debugLog("deactivate: no current panel to dispose");
+		return;
+	}
+
+	const result = await panel.disposeAndWaitForDebug(1000);
+	debugLog("deactivate: panel disposal probe completed", { result });
+	logWebviewLifecycleSnapshot("deactivate: after panel disposal probe");
 }
 

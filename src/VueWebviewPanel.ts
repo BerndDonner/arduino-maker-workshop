@@ -14,6 +14,7 @@ export class VueWebviewPanel {
 
     private readonly _panel: WebviewPanel;
     private _disposables: Disposable[] = [];
+    private _disposed = false;
     public static currentPanel: VueWebviewPanel | undefined;
     private static readonly EMPTY_OUTDATED_PAYLOAD = JSON.stringify({ platforms: [], libraries: [] });
     private usbChange() {
@@ -396,7 +397,10 @@ export class VueWebviewPanel {
         );
 
         this._panel.onDidDispose(() => {
-            debugLog("webview: panel onDidDispose");
+            debugLog("webview: panel onDidDispose", {
+                wrapperAlreadyDisposed: this._disposed,
+                isCurrentPanel: VueWebviewPanel.currentPanel === this
+            });
             this.dispose();
         }, null, this._disposables);
         debugLog("webview: before assigning html");
@@ -1312,10 +1316,21 @@ export class VueWebviewPanel {
     }
 
     public dispose() {
-        debugLog("webview: dispose begin");
+        if (this._disposed) {
+            debugLog("webview: dispose skipped; already disposed");
+            return;
+        }
+
+        this._disposed = true;
+        debugLog("webview: dispose begin", {
+            visible: this._panel.visible,
+            active: this._panel.active,
+            disposableCount: this._disposables.length
+        });
         VueWebviewPanel.currentPanel = undefined;
 
         this._panel.dispose();
+        debugLog("webview: panel.dispose returned");
 
         while (this._disposables.length) {
             const disposable = this._disposables.pop();
@@ -1324,6 +1339,47 @@ export class VueWebviewPanel {
             }
         }
         debugLog("webview: dispose end");
+    }
+
+    /**
+     * Debug-only shutdown probe. It records whether VS Code emits
+     * onDidDispose while deactivate() is still allowed to run.
+     */
+    public disposeAndWaitForDebug(timeoutMs = 1000): Promise<"disposed" | "timeout"> {
+        debugLog("webview: shutdown probe begin", {
+            timeoutMs,
+            visible: this._panel.visible,
+            active: this._panel.active,
+            wrapperAlreadyDisposed: this._disposed
+        });
+
+        if (this._disposed) {
+            debugLog("webview: shutdown probe skipped; already disposed");
+            return Promise.resolve("disposed");
+        }
+
+        return new Promise((resolve) => {
+            let settled = false;
+            let probeListener: Disposable | undefined;
+
+            const finish = (result: "disposed" | "timeout") => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                probeListener?.dispose();
+                debugLog("webview: shutdown probe finished", { result });
+                resolve(result);
+            };
+
+            probeListener = this._panel.onDidDispose(() => {
+                debugLog("webview: shutdown probe observed onDidDispose");
+                finish("disposed");
+            });
+
+            setTimeout(() => finish("timeout"), timeoutMs);
+            this.dispose();
+        });
     }
 
     private _getWebviewContent(webview: Webview, extensionUri: Uri) {
