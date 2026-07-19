@@ -6,6 +6,7 @@ import { ARDUINO_ERRORS, ARDUINO_MESSAGES, ArduinoExtensionChannelName, PROFILES
 import { ArduinoCLI } from "./cli";
 import { SketchProfileManager } from "./sketchProfileManager";
 import { CliOutputView } from "./cliOutputView";
+import { debugLog, initializeDebugLog } from "./debugLog";
 
 const os = require('os');
 const path = require('path');
@@ -98,21 +99,39 @@ async function ensureSerialMonitorAvailable(): Promise<void> {
 }
 
 export async function activate(context: ExtensionContext) {
+	const debugLogPath = initializeDebugLog(context);
+	arduinoExtensionChannel.appendLine(`Persistent debug log: ${debugLogPath}`);
+	debugLog("activate: begin");
+
 	context.subscriptions.push(vsCommandAddSubfolderToWorkspace());
 
-	ensureSerialMonitorAvailable();
+	debugLog("activate: before ensureSerialMonitorAvailable");
+	void ensureSerialMonitorAvailable().then(
+		() => debugLog("activate: ensureSerialMonitorAvailable resolved"),
+		(error) => debugLog("activate: ensureSerialMonitorAvailable rejected", String(error))
+	);
 
+	debugLog("activate: before compile output registration");
 	compileOutputView = new CliOutputView(context);
 	compileOutputProvider = window.registerWebviewViewProvider(CliOutputView.viewType, compileOutputView);
 	context.subscriptions.push(compileOutputView, compileOutputProvider);
+	debugLog("activate: compile output registered");
 
+	debugLog("activate: before ArduinoCLI construction");
 	arduinoCLI = new ArduinoCLI(context);
+	debugLog("activate: before isCLIReady");
 	if (await arduinoCLI.isCLIReady()) {
+		debugLog("activate: isCLIReady true");
 		arduinoExtensionChannel.appendLine(`Arduino CLI is ready, path: ${arduinoCLI.arduinoCLIPath}`);
+		debugLog("activate: before isConfigReady");
 		if (await arduinoCLI.isConfigReady()) {
+			debugLog("activate: isConfigReady true");
 			arduinoExtensionChannel.appendLine(`Arduino Config file is good`);
+			debugLog("activate: before verifyUserDirectorySetting");
 			await verifyUserDirectorySetting();
+			debugLog("activate: after verifyUserDirectorySetting");
 			checkYamlStatus();
+			debugLog("activate: after checkYamlStatus");
 
 			context.subscriptions.push(
 				workspace.onDidChangeConfiguration((e) => {
@@ -134,13 +153,19 @@ export async function activate(context: ExtensionContext) {
 			context.subscriptions.push(
 				window.registerWebviewPanelSerializer('vueWebview', {
 					deserializeWebviewPanel(webviewPanel) {
+						debugLog("serializer: deserializeWebviewPanel");
 						VueWebviewPanel.restore(webviewPanel, context);
 					}
 				})
 			);
 
 			context.subscriptions.push(
-				workspace.onDidChangeWorkspaceFolders(() => {
+				workspace.onDidChangeWorkspaceFolders((event) => {
+					debugLog("workspace folders changed: begin", {
+						added: event.added.map((folder) => folder.uri.fsPath),
+						removed: event.removed.map((folder) => folder.uri.fsPath),
+						current: workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? []
+					});
 					arduinoProject.readConfiguration();
 					arduinoYaml.refreshProjectState();
 					arduinoCLI.setBuildResult(false);
@@ -148,6 +173,7 @@ export async function activate(context: ExtensionContext) {
 					checkYamlStatus();
 					updateStateCompileUpload();
 					VueWebviewPanel.refreshActiveProject();
+					debugLog("workspace folders changed: end");
 				})
 			);
 
@@ -166,6 +192,7 @@ export async function activate(context: ExtensionContext) {
 
 			context.subscriptions.push(
 				commands.registerCommand('extension.openVueWebview', () => {
+					debugLog("command: extension.openVueWebview");
 					VueWebviewPanel.render(context);
 				})
 			);
@@ -276,17 +303,20 @@ export async function activate(context: ExtensionContext) {
 			sourceWatcher.onDidCreate((uri) => invalidateBuild(uri.fsPath));
 			sourceWatcher.onDidDelete((uri) => invalidateBuild(uri.fsPath));
 			context.subscriptions.push(sourceWatcher);
+			debugLog("activate: completed");
 
 		} else {
 			arduinoProject.setStatus(ARDUINO_ERRORS.CONFIG_FILE_PROBLEM);
 			const configError = arduinoCLI.lastCLIError() || 'Arduino CLI configuration is not valid';
 			arduinoExtensionChannel.appendLine(`${configError}`);
+			debugLog("activate: isConfigReady false", configError);
 			return;
 		}
 	} else {
 		arduinoProject.setStatus(ARDUINO_ERRORS.CLI_NOT_WORKING);
 		const cliError = arduinoCLI.lastCLIError() || 'Arduino CLI is not available';
 		arduinoExtensionChannel.appendLine(`${cliError}`);
+		debugLog("activate: isCLIReady false", cliError);
 		return;
 	}
 
@@ -757,5 +787,7 @@ function vsCommandAddSubfolderToWorkspace(): Disposable {
 	);
 }
 
-export function deactivate() { }
+export function deactivate() {
+	debugLog("=== EXTENSION DEACTIVATE ===");
+}
 

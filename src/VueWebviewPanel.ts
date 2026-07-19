@@ -3,6 +3,7 @@ import { getUri } from "./utilities/getUri";
 import { getNonce } from "./utilities/getNonce";
 import { ARDUINO_ERRORS, ARDUINO_MESSAGES, BacktraceDecodeFrame, BacktraceDecodeResult, ESP32_PARTITION_BUILDER_BASE_URL, PROFILES_STATUS, SketchProjectFile, WebviewToExtensionMessage } from './shared/messages';
 import { arduinoCLI, arduinoExtensionChannel, arduinoProject, arduinoYaml, changeTheme, compile, loadArduinoConfiguration, openExample, shouldCheckForUpdates, shouldDetectPorts, updateStateCompileUpload } from "./extension";
+import { debugLog } from "./debugLog";
 
 const path = require('path');
 const os = require('os');
@@ -21,6 +22,7 @@ export class VueWebviewPanel {
         }
     }
     private constructor(panel: WebviewPanel, extensionUri: Uri) {
+        debugLog("webview: constructor begin", { visible: panel.visible, active: panel.active });
         this._panel = panel;
         if (os.platform() === 'win32') {
             try {
@@ -38,6 +40,7 @@ export class VueWebviewPanel {
         // Handle messages from the Vue web application
         this._panel.webview.onDidReceiveMessage(
             (message: WebviewToExtensionMessage) => {
+                debugLog("webview: received message", { command: message.command });
                 switch (message.command) {
                     case ARDUINO_MESSAGES.CLI_CREATE_NEW_SKETCH:
                         arduinoCLI.createNewSketch(message.payload);
@@ -392,8 +395,13 @@ export class VueWebviewPanel {
             this._disposables
         );
 
-        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+        this._panel.onDidDispose(() => {
+            debugLog("webview: panel onDidDispose");
+            this.dispose();
+        }, null, this._disposables);
+        debugLog("webview: before assigning html");
         this._panel.webview.html = this._getWebviewContent(this._panel.webview, extensionUri);
+        debugLog("webview: constructor ready", { visible: panel.visible, active: panel.active });
         arduinoExtensionChannel.appendLine("Arduino Web view ready");
     }
 
@@ -1215,6 +1223,11 @@ export class VueWebviewPanel {
     }
 
     public static sendMessage(message: WebviewToExtensionMessage) {
+        debugLog("webview: sendMessage", {
+            command: message.command,
+            hasPanel: !!VueWebviewPanel.currentPanel,
+            errorMessage: message.errorMessage
+        });
         if (VueWebviewPanel.currentPanel) {
             VueWebviewPanel.currentPanel._panel.webview.postMessage(message);
             // arduinoExtensionChannel.appendLine(`Message to vue app: ${message.payload}`);
@@ -1224,12 +1237,15 @@ export class VueWebviewPanel {
     }
 
     public static restore(panel: WebviewPanel, context: ExtensionContext): void {
+        debugLog("webview: restore begin", { visible: panel.visible, active: panel.active });
         VueWebviewPanel.configurePanel(panel, context);
         VueWebviewPanel.currentPanel = new VueWebviewPanel(panel, context.extensionUri);
         changeTheme(window.activeColorTheme.kind);
+        debugLog("webview: restore end");
     }
 
     public static refreshActiveProject(): void {
+        debugLog("webview: refreshActiveProject begin");
         const projectStatus = arduinoProject.getStatus();
         VueWebviewPanel.sendMessage({
             command: ARDUINO_MESSAGES.ARDUINO_PROJECT_STATUS,
@@ -1252,9 +1268,11 @@ export class VueWebviewPanel {
         }
 
         sendBuildProfiles();
+        debugLog("webview: refreshActiveProject end", { status: projectStatus.status });
     }
 
     public static render(context: ExtensionContext) {
+        debugLog("webview: render", { hasPanel: !!VueWebviewPanel.currentPanel });
 
         if (VueWebviewPanel.currentPanel) {
             VueWebviewPanel.currentPanel._panel.reveal(ViewColumn.One);
@@ -1294,6 +1312,7 @@ export class VueWebviewPanel {
     }
 
     public dispose() {
+        debugLog("webview: dispose begin");
         VueWebviewPanel.currentPanel = undefined;
 
         this._panel.dispose();
@@ -1304,6 +1323,7 @@ export class VueWebviewPanel {
                 disposable.dispose();
             }
         }
+        debugLog("webview: dispose end");
     }
 
     private _getWebviewContent(webview: Webview, extensionUri: Uri) {
