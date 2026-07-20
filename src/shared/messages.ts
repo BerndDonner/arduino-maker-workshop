@@ -566,8 +566,7 @@ export const ARDUINO_MESSAGES = {
   OPEN_WORKSPACE_FOLDER: 'openWorkspaceFolder',
 
   // Webview lifecycle commands
-  WEBVIEW_CLOSE_REQUIRED: 'webviewCloseRequired',
-  WEBVIEW_CLOSE_ACKNOWLEDGED: 'webviewCloseAcknowledged',
+  WEBVIEW_HEARTBEAT: 'webviewHeartbeat',
 
   // Misc commands
   OPEN_LIBRARY: 'openExample',

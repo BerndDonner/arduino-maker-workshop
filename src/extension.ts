@@ -818,18 +818,8 @@ function vsCommandAddSubfolderToWorkspace(): Disposable {
 	);
 }
 
-export async function deactivate(): Promise<void> {
+export function deactivate(): void {
 	debugLog("=== EXTENSION DEACTIVATE ===");
-	logWebviewLifecycleSnapshot("deactivate: before close handshake");
-
-	const panel = VueWebviewPanel.currentPanel;
-	if (!panel) {
-		debugLog("deactivate: no current panel for close handshake");
-		return;
-	}
-
-	const result = await panel.requestCloseState(1000);
-	debugLog("deactivate: close handshake completed", { result });
-	logWebviewLifecycleSnapshot("deactivate: after close handshake");
+	logWebviewLifecycleSnapshot("deactivate: lifecycle snapshot");
 }
 

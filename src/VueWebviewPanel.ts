@@ -15,7 +15,8 @@ export class VueWebviewPanel {
     private readonly _panel: WebviewPanel;
     private _disposables: Disposable[] = [];
     private _disposed = false;
-    private _closeAcknowledgementResolver: (() => void) | undefined;
+    private _heartbeatTimer: NodeJS.Timeout | undefined;
+    private _heartbeatSequence = 0;
     public static currentPanel: VueWebviewPanel | undefined;
     private static readonly EMPTY_OUTDATED_PAYLOAD = JSON.stringify({ platforms: [], libraries: [] });
     private usbChange() {
@@ -386,11 +387,6 @@ export class VueWebviewPanel {
                     case ARDUINO_MESSAGES.SET_CONFIGURATION_REQUIRED:
                         arduinoProject.setConfigurationRequired(message.payload);
                         break;
-                    case ARDUINO_MESSAGES.WEBVIEW_CLOSE_ACKNOWLEDGED:
-                        debugLog("webview: close request acknowledged", { payload: message.payload });
-                        this._closeAcknowledgementResolver?.();
-                        this._closeAcknowledgementResolver = undefined;
-                        break;
                     case ARDUINO_MESSAGES.LOG_DEBUG:
                         arduinoExtensionChannel.appendLine(`WebView DEBUG message: ${message.payload}`)
                         break;
@@ -411,6 +407,7 @@ export class VueWebviewPanel {
         }, null, this._disposables);
         debugLog("webview: before assigning html");
         this._panel.webview.html = this._getWebviewContent(this._panel.webview, extensionUri);
+        this.startHeartbeat();
         debugLog("webview: constructor ready", { visible: panel.visible, active: panel.active });
         arduinoExtensionChannel.appendLine("Arduino Web view ready");
     }
@@ -1335,6 +1332,12 @@ export class VueWebviewPanel {
         });
         VueWebviewPanel.currentPanel = undefined;
 
+        if (this._heartbeatTimer) {
+            clearInterval(this._heartbeatTimer);
+            this._heartbeatTimer = undefined;
+            debugLog("webview: heartbeat stopped");
+        }
+
         this._panel.dispose();
         debugLog("webview: panel.dispose returned");
 
@@ -1347,53 +1350,31 @@ export class VueWebviewPanel {
         debugLog("webview: dispose end");
     }
 
-    /**
-     * Tells the webview that its extension host is shutting down and waits until
-     * the webview has switched to its terminal UI state. The panel intentionally
-     * remains open: after extension deactivation it can no longer be controlled,
-     * so the webview itself must make that state visible before acknowledging.
-     */
-    public requestCloseState(timeoutMs = 1000): Promise<"acknowledged" | "timeout"> {
-        debugLog("webview: close handshake begin", {
-            timeoutMs,
-            visible: this._panel.visible,
-            active: this._panel.active,
-            wrapperAlreadyDisposed: this._disposed
-        });
+    private startHeartbeat(): void {
+        const intervalMs = 1000;
+        debugLog("webview: heartbeat started", { intervalMs });
 
-        if (this._disposed) {
-            debugLog("webview: close handshake skipped; already disposed");
-            return Promise.resolve("acknowledged");
-        }
+        const sendHeartbeat = () => {
+            if (this._disposed) {
+                return;
+            }
 
-        return new Promise((resolve) => {
-            let settled = false;
-
-            const finish = (result: "acknowledged" | "timeout") => {
-                if (settled) {
-                    return;
-                }
-                settled = true;
-                this._closeAcknowledgementResolver = undefined;
-                debugLog("webview: close handshake finished", { result });
-                resolve(result);
-            };
-
-            this._closeAcknowledgementResolver = () => finish("acknowledged");
-
+            const sequence = ++this._heartbeatSequence;
             void this._panel.webview.postMessage({
-                command: ARDUINO_MESSAGES.WEBVIEW_CLOSE_REQUIRED,
+                command: ARDUINO_MESSAGES.WEBVIEW_HEARTBEAT,
                 errorMessage: "",
-                payload: { state: "close-required" }
+                payload: { sequence, sentAt: Date.now() }
             }).then((delivered) => {
-                debugLog("webview: close request posted", { delivered });
-                if (!delivered) {
-                    finish("timeout");
+                if (sequence === 1) {
+                    debugLog("webview: first heartbeat posted", { delivered });
+                } else if (!delivered) {
+                    debugLog("webview: heartbeat not delivered", { sequence });
                 }
             });
+        };
 
-            setTimeout(() => finish("timeout"), timeoutMs);
-        });
+        sendHeartbeat();
+        this._heartbeatTimer = setInterval(sendHeartbeat, intervalMs);
     }
 
     private _getWebviewContent(webview: Webview, extensionUri: Uri) {
