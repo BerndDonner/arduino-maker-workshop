@@ -565,6 +565,10 @@ export const ARDUINO_MESSAGES = {
   OPEN_FILE_AT_LOCATION: 'openFileAtLocation',
   OPEN_WORKSPACE_FOLDER: 'openWorkspaceFolder',
 
+  // Webview lifecycle commands
+  WEBVIEW_CLOSE_REQUIRED: 'webviewCloseRequired',
+  WEBVIEW_CLOSE_ACKNOWLEDGED: 'webviewCloseAcknowledged',
+
   // Misc commands
   OPEN_LIBRARY: 'openExample',
   CHANGE_THEME_COLOR: "changeThemeColor",

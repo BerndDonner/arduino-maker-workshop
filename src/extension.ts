@@ -820,16 +820,16 @@ function vsCommandAddSubfolderToWorkspace(): Disposable {
 
 export async function deactivate(): Promise<void> {
 	debugLog("=== EXTENSION DEACTIVATE ===");
-	logWebviewLifecycleSnapshot("deactivate: before panel disposal");
+	logWebviewLifecycleSnapshot("deactivate: before close handshake");
 
 	const panel = VueWebviewPanel.currentPanel;
 	if (!panel) {
-		debugLog("deactivate: no current panel to dispose");
+		debugLog("deactivate: no current panel for close handshake");
 		return;
 	}
 
-	const result = await panel.disposeAndWaitForDebug(1000);
-	debugLog("deactivate: panel disposal probe completed", { result });
-	logWebviewLifecycleSnapshot("deactivate: after panel disposal probe");
+	const result = await panel.requestCloseState(1000);
+	debugLog("deactivate: close handshake completed", { result });
+	logWebviewLifecycleSnapshot("deactivate: after close handshake");
 }
 

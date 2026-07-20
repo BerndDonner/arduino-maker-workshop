@@ -15,6 +15,7 @@ export class VueWebviewPanel {
     private readonly _panel: WebviewPanel;
     private _disposables: Disposable[] = [];
     private _disposed = false;
+    private _closeAcknowledgementResolver: (() => void) | undefined;
     public static currentPanel: VueWebviewPanel | undefined;
     private static readonly EMPTY_OUTDATED_PAYLOAD = JSON.stringify({ platforms: [], libraries: [] });
     private usbChange() {
@@ -384,6 +385,11 @@ export class VueWebviewPanel {
                         break;
                     case ARDUINO_MESSAGES.SET_CONFIGURATION_REQUIRED:
                         arduinoProject.setConfigurationRequired(message.payload);
+                        break;
+                    case ARDUINO_MESSAGES.WEBVIEW_CLOSE_ACKNOWLEDGED:
+                        debugLog("webview: close request acknowledged", { payload: message.payload });
+                        this._closeAcknowledgementResolver?.();
+                        this._closeAcknowledgementResolver = undefined;
                         break;
                     case ARDUINO_MESSAGES.LOG_DEBUG:
                         arduinoExtensionChannel.appendLine(`WebView DEBUG message: ${message.payload}`)
@@ -1342,11 +1348,13 @@ export class VueWebviewPanel {
     }
 
     /**
-     * Debug-only shutdown probe. It records whether VS Code emits
-     * onDidDispose while deactivate() is still allowed to run.
+     * Tells the webview that its extension host is shutting down and waits until
+     * the webview has switched to its terminal UI state. The panel intentionally
+     * remains open: after extension deactivation it can no longer be controlled,
+     * so the webview itself must make that state visible before acknowledging.
      */
-    public disposeAndWaitForDebug(timeoutMs = 1000): Promise<"disposed" | "timeout"> {
-        debugLog("webview: shutdown probe begin", {
+    public requestCloseState(timeoutMs = 1000): Promise<"acknowledged" | "timeout"> {
+        debugLog("webview: close handshake begin", {
             timeoutMs,
             visible: this._panel.visible,
             active: this._panel.active,
@@ -1354,31 +1362,37 @@ export class VueWebviewPanel {
         });
 
         if (this._disposed) {
-            debugLog("webview: shutdown probe skipped; already disposed");
-            return Promise.resolve("disposed");
+            debugLog("webview: close handshake skipped; already disposed");
+            return Promise.resolve("acknowledged");
         }
 
         return new Promise((resolve) => {
             let settled = false;
-            let probeListener: Disposable | undefined;
 
-            const finish = (result: "disposed" | "timeout") => {
+            const finish = (result: "acknowledged" | "timeout") => {
                 if (settled) {
                     return;
                 }
                 settled = true;
-                probeListener?.dispose();
-                debugLog("webview: shutdown probe finished", { result });
+                this._closeAcknowledgementResolver = undefined;
+                debugLog("webview: close handshake finished", { result });
                 resolve(result);
             };
 
-            probeListener = this._panel.onDidDispose(() => {
-                debugLog("webview: shutdown probe observed onDidDispose");
-                finish("disposed");
+            this._closeAcknowledgementResolver = () => finish("acknowledged");
+
+            void this._panel.webview.postMessage({
+                command: ARDUINO_MESSAGES.WEBVIEW_CLOSE_REQUIRED,
+                errorMessage: "",
+                payload: { state: "close-required" }
+            }).then((delivered) => {
+                debugLog("webview: close request posted", { delivered });
+                if (!delivered) {
+                    finish("timeout");
+                }
             });
 
             setTimeout(() => finish("timeout"), timeoutMs);
-            this.dispose();
         });
     }
 
